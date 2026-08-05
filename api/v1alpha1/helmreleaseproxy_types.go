@@ -23,6 +23,9 @@ import (
 )
 
 const (
+	// AnnotationValueTrue is the enabled value for boolean HelmReleaseProxy annotations.
+	AnnotationValueTrue = "true"
+
 	// HelmReleaseProxyFinalizer is the finalizer used by the HelmReleaseProxy controller to cleanup add-on resources when
 	// a HelmReleaseProxy is being deleted.
 	HelmReleaseProxyFinalizer = "helmreleaseproxy.addons.cluster.x-k8s.io"
@@ -36,6 +39,11 @@ const (
 	// ReleaseSuccessfullyInstalledAnnotation is the annotation signifying the Helm release has been successfully installed at least once.
 	// This is used to determine if the HelmReleaseProxy is in a ready state for the InstallOnce strategy.
 	ReleaseSuccessfullyInstalledAnnotation = "helmreleaseproxy.addons.cluster.x-k8s.io/release-successfully-installed"
+
+	// OrphanOnDeleteAnnotation requests that deletion of this HelmReleaseProxy preserve the Helm release in the workload Cluster.
+	// This is intended for one-shot controller handoffs where a replacement HelmReleaseProxy adopts the same release.
+	// The annotation must be set to "true" and is not copied to replacement HelmReleaseProxy objects.
+	OrphanOnDeleteAnnotation = "helmreleaseproxy.addons.cluster.x-k8s.io/orphan-on-delete"
 )
 
 // HelmReleaseProxySpec defines the desired state of HelmReleaseProxy.

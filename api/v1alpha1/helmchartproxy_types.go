@@ -33,6 +33,13 @@ const (
 	// DefaultOCIKey is the default file name of the OCI secret key.
 	DefaultOCIKey = "config.json"
 
+	// OrphanOnRepositoryChangeAnnotation opts a HelmChartProxy into preserving
+	// existing releases during one specific repository handoff. Its value must
+	// equal the HelmChartProxy's new RepoURL. The HelmChartProxy controller then
+	// marks each old HelmReleaseProxy orphan-on-delete immediately before
+	// deleting it. A later repository change requires a new annotation value.
+	OrphanOnRepositoryChangeAnnotation = "helmchartproxy.addons.cluster.x-k8s.io/orphan-on-repository-change"
+
 	// ReconcileStrategyContinuous is the default reconciliation strategy for HelmChartProxy. It will attempt to install the Helm
 	// chart on a selected Cluster, update the Helm release to match the current HelmChartProxy spec, and delete the Helm release
 	// if the Cluster no longer selected.

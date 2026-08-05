@@ -79,7 +79,7 @@ var (
 			Name:      "test-proxy",
 			Namespace: "default",
 			Annotations: map[string]string{
-				addonsv1alpha1.ReleaseSuccessfullyInstalledAnnotation: "true",
+				addonsv1alpha1.ReleaseSuccessfullyInstalledAnnotation: addonsv1alpha1.AnnotationValueTrue,
 			},
 		},
 		Spec: addonsv1alpha1.HelmReleaseProxySpec{
@@ -442,7 +442,6 @@ func TestReconcileNormal(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
@@ -508,7 +507,6 @@ func TestReconcileNormalWithCredentialRef(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
@@ -574,7 +572,6 @@ func TestReconcileNormalWithACertificateRef(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
@@ -678,10 +675,55 @@ func TestReconcileDelete(t *testing.T) {
 			},
 			expectedError: "",
 		},
+		{
+			name: "preserve a Continuous Helm release when orphan-on-delete is true",
+			helmReleaseProxy: func() *addonsv1alpha1.HelmReleaseProxy {
+				hrp := defaultProxy.DeepCopy()
+				hrp.Annotations = map[string]string{
+					addonsv1alpha1.OrphanOnDeleteAnnotation: addonsv1alpha1.AnnotationValueTrue,
+				}
+
+				return hrp
+			}(),
+			clientExpect: func(g *WithT, c *mocks.MockClientMockRecorder) {
+				// no client calls expected
+			},
+			expect: func(g *WithT, hrp *addonsv1alpha1.HelmReleaseProxy) {
+				g.Expect(hrp.Spec.ReconcileStrategy).To(Equal(string(addonsv1alpha1.ReconcileStrategyContinuous)))
+				g.Expect(hrp.Annotations[addonsv1alpha1.OrphanOnDeleteAnnotation]).To(Equal(addonsv1alpha1.AnnotationValueTrue))
+			},
+			expectedError: "",
+		},
+		{
+			name: "do not preserve a Continuous Helm release when orphan-on-delete is false",
+			helmReleaseProxy: func() *addonsv1alpha1.HelmReleaseProxy {
+				hrp := defaultProxy.DeepCopy()
+				hrp.Annotations = map[string]string{
+					addonsv1alpha1.OrphanOnDeleteAnnotation: "false",
+				}
+
+				return hrp
+			}(),
+			clientExpect: func(g *WithT, c *mocks.MockClientMockRecorder) {
+				c.GetHelmRelease(ctx, restConfig, defaultProxy.DeepCopy().Spec).Return(&helmRelease.Release{
+					Name:    "test-release",
+					Version: 1,
+					Info: &helmRelease.Info{
+						Status: helmRelease.StatusDeployed,
+					},
+				}, nil).Times(1)
+				c.UninstallHelmRelease(ctx, restConfig, defaultProxy.DeepCopy().Spec).Return(&helmRelease.UninstallReleaseResponse{}, nil).Times(1)
+			},
+			expect: func(g *WithT, hrp *addonsv1alpha1.HelmReleaseProxy) {
+				g.Expect(conditions.Has(hrp, addonsv1alpha1.HelmReleaseReadyCondition)).To(BeTrue())
+				releaseReady := conditions.Get(hrp, addonsv1alpha1.HelmReleaseReadyCondition)
+				g.Expect(releaseReady.Reason).To(Equal(addonsv1alpha1.HelmReleaseDeletedReason))
+			},
+			expectedError: "",
+		},
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
@@ -746,7 +788,6 @@ func TestTLSSettings(t *testing.T) {
 		},
 	}
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()

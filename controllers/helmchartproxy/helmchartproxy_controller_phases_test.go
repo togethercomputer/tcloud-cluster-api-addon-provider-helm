@@ -17,6 +17,7 @@ limitations under the License.
 package helmchartproxy
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -386,7 +387,7 @@ var (
 				addonsv1alpha1.HelmChartProxyLabelName: "test-hcp",
 			},
 			Annotations: map[string]string{
-				addonsv1alpha1.ReleaseSuccessfullyInstalledAnnotation: "true",
+				addonsv1alpha1.ReleaseSuccessfullyInstalledAnnotation: addonsv1alpha1.AnnotationValueTrue,
 			},
 		},
 		Spec: addonsv1alpha1.HelmReleaseProxySpec{
@@ -558,6 +559,27 @@ func TestReconcileForCluster(t *testing.T) {
 			expectedError: "",
 		},
 		{
+			name: "when strategy is InstallOnce, replace ready HelmReleaseProxy for an opted-in repository handoff",
+			helmChartProxy: func() *addonsv1alpha1.HelmChartProxy {
+				hcp := fakeInstallOnceHelmChartProxy1.DeepCopy()
+				hcp.Spec.RepoURL = "oci://registry.example.test/charts"
+				hcp.Annotations = map[string]string{
+					addonsv1alpha1.OrphanOnRepositoryChangeAnnotation: hcp.Spec.RepoURL,
+				}
+
+				return hcp
+			}(),
+			existingHelmReleaseProxy:      fakeReadyHelmReleaseProxy.DeepCopy(),
+			cluster:                       fakeCluster1,
+			expectHelmReleaseProxyToExist: false,
+			expect: func(g *WithT, hcp *addonsv1alpha1.HelmChartProxy, hrp *addonsv1alpha1.HelmReleaseProxy) {
+				g.Expect(conditions.Has(hcp, addonsv1alpha1.HelmReleaseProxySpecsUpToDateCondition)).To(BeTrue())
+				specsReady := conditions.Get(hcp, addonsv1alpha1.HelmReleaseProxySpecsUpToDateCondition)
+				g.Expect(specsReady.Reason).To(Equal(addonsv1alpha1.HelmReleaseProxyReinstallingReason))
+			},
+			expectedError: "",
+		},
+		{
 			name:                          "when strategy is InstallOnce, update if HelmReleaseProxy is not ready when Cluster value changes",
 			helmChartProxy:                fakeInstallOnceHelmChartProxy1,
 			existingHelmReleaseProxy:      fakeHelmReleaseProxy,
@@ -593,7 +615,6 @@ func TestReconcileForCluster(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()
@@ -627,6 +648,56 @@ func TestReconcileForCluster(t *testing.T) {
 				tc.expect(g, tc.helmChartProxy, hrp)
 			}
 		})
+	}
+}
+
+func TestShouldOrphanForRepositoryChange(t *testing.T) {
+	t.Parallel()
+
+	existing := &addonsv1alpha1.HelmReleaseProxy{Spec: addonsv1alpha1.HelmReleaseProxySpec{RepoURL: "https://old.example.test"}}
+	desired := &addonsv1alpha1.HelmChartProxy{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			addonsv1alpha1.OrphanOnRepositoryChangeAnnotation: "oci://registry.example.test/charts",
+		}},
+		Spec: addonsv1alpha1.HelmChartProxySpec{RepoURL: "oci://registry.example.test/charts"},
+	}
+
+	if !shouldOrphanForRepositoryChange(existing, desired) {
+		t.Fatal("expected exact annotated repository handoff to preserve the release")
+	}
+
+	desired.Annotations[addonsv1alpha1.OrphanOnRepositoryChangeAnnotation] = "oci://different.example.test/charts"
+	if shouldOrphanForRepositoryChange(existing, desired) {
+		t.Fatal("stale target annotation must not preserve a later repository change")
+	}
+
+	desired.Annotations[addonsv1alpha1.OrphanOnRepositoryChangeAnnotation] = desired.Spec.RepoURL
+	existing.Spec.RepoURL = desired.Spec.RepoURL
+	if shouldOrphanForRepositoryChange(existing, desired) {
+		t.Fatal("unchanged repository must not trigger source-handoff orphaning")
+	}
+}
+
+func TestOrphanHelmReleaseProxyPersistsFinalizerInstruction(t *testing.T) {
+	t.Parallel()
+
+	release := &addonsv1alpha1.HelmReleaseProxy{ObjectMeta: metav1.ObjectMeta{
+		Name:      "test-release",
+		Namespace: "test-namespace",
+	}}
+	c := fake.NewClientBuilder().WithScheme(fakeScheme).WithObjects(release).Build()
+	r := &HelmChartProxyReconciler{Client: c}
+
+	if err := r.orphanHelmReleaseProxy(context.Background(), release); err != nil {
+		t.Fatalf("orphanHelmReleaseProxy() error = %v", err)
+	}
+
+	got := &addonsv1alpha1.HelmReleaseProxy{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(release), got); err != nil {
+		t.Fatalf("get HelmReleaseProxy: %v", err)
+	}
+	if got.Annotations[addonsv1alpha1.OrphanOnDeleteAnnotation] != addonsv1alpha1.AnnotationValueTrue {
+		t.Fatalf("orphan-on-delete annotation = %q, want true", got.Annotations[addonsv1alpha1.OrphanOnDeleteAnnotation])
 	}
 }
 
@@ -1360,8 +1431,6 @@ func TestConstructHelmReleaseProxy(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
-
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 
@@ -1444,7 +1513,7 @@ func TestShouldReinstallHelmRelease(t *testing.T) {
 			helmReleaseProxy: &addonsv1alpha1.HelmReleaseProxy{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						addonsv1alpha1.IsReleaseNameGeneratedAnnotation: "true",
+						addonsv1alpha1.IsReleaseNameGeneratedAnnotation: addonsv1alpha1.AnnotationValueTrue,
 					},
 				},
 				Spec: addonsv1alpha1.HelmReleaseProxySpec{
@@ -1467,7 +1536,7 @@ func TestShouldReinstallHelmRelease(t *testing.T) {
 			helmReleaseProxy: &addonsv1alpha1.HelmReleaseProxy{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						addonsv1alpha1.IsReleaseNameGeneratedAnnotation: "true",
+						addonsv1alpha1.IsReleaseNameGeneratedAnnotation: addonsv1alpha1.AnnotationValueTrue,
 					},
 				},
 				Spec: addonsv1alpha1.HelmReleaseProxySpec{
@@ -1490,7 +1559,7 @@ func TestShouldReinstallHelmRelease(t *testing.T) {
 			helmReleaseProxy: &addonsv1alpha1.HelmReleaseProxy{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						addonsv1alpha1.IsReleaseNameGeneratedAnnotation: "true",
+						addonsv1alpha1.IsReleaseNameGeneratedAnnotation: addonsv1alpha1.AnnotationValueTrue,
 					},
 				},
 				Spec: addonsv1alpha1.HelmReleaseProxySpec{
@@ -1513,7 +1582,7 @@ func TestShouldReinstallHelmRelease(t *testing.T) {
 			helmReleaseProxy: &addonsv1alpha1.HelmReleaseProxy{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						addonsv1alpha1.IsReleaseNameGeneratedAnnotation: "true",
+						addonsv1alpha1.IsReleaseNameGeneratedAnnotation: addonsv1alpha1.AnnotationValueTrue,
 					},
 				},
 				Spec: addonsv1alpha1.HelmReleaseProxySpec{
@@ -1536,8 +1605,6 @@ func TestShouldReinstallHelmRelease(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
-
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 
@@ -1672,8 +1739,6 @@ func TestGetOrphanedHelmReleaseProxies(t *testing.T) {
 	}
 
 	for _, tc := range testCases {
-		tc := tc
-
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 

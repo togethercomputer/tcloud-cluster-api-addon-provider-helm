@@ -261,7 +261,7 @@ var (
 				addonsv1alpha1.HelmChartProxyLabelName: "test-hcp",
 			},
 			Annotations: map[string]string{
-				addonsv1alpha1.ReleaseSuccessfullyInstalledAnnotation: "true",
+				addonsv1alpha1.ReleaseSuccessfullyInstalledAnnotation: addonsv1alpha1.AnnotationValueTrue,
 			},
 		},
 		Spec: addonsv1alpha1.HelmReleaseProxySpec{
@@ -307,7 +307,7 @@ var (
 				addonsv1alpha1.HelmChartProxyLabelName: "test-hcp",
 			},
 			Annotations: map[string]string{
-				addonsv1alpha1.ReleaseSuccessfullyInstalledAnnotation: "true",
+				addonsv1alpha1.ReleaseSuccessfullyInstalledAnnotation: addonsv1alpha1.AnnotationValueTrue,
 			},
 		},
 		Spec: addonsv1alpha1.HelmReleaseProxySpec{
@@ -652,7 +652,6 @@ func TestReconcileNormal(t *testing.T) {
 	}
 
 	for _, tc := range testcases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			g := NewWithT(t)
 			t.Parallel()

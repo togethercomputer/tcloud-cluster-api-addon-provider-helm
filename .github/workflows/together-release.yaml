@@ -1,0 +1,73 @@
+name: Together release
+
+on: # yamllint disable-line rule:truthy
+  push:
+    tags:
+      - "v*-together.*"
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push:
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+      security-events: write
+      actions: read
+      attestations: write
+    uses: togethercomputer/github-actions/.github/workflows/shared--build-and-push.yaml@c40330d90652f7d21357eca45c3866ae5470c984 # v1
+    with:
+      image-name: cluster-api-helm-controller
+      registry: 651706779278.dkr.ecr.us-west-2.amazonaws.com
+      runs-on: ubuntu-24.04-16core
+      auth-type: ecr-oidc
+      aws-gha-role: arn:aws:iam::651706779278:role/github-actions-oidc-role
+      ecr-pull-role: arn:aws:iam::651706779278:role/github-actions-oidc-role
+      context: .
+      dockerfile: Dockerfile
+      platforms: linux/amd64
+      build-args: |
+        builder_image=golang:1.22.10
+        deployment_base_image=gcr.io/distroless/static
+        deployment_base_image_tag=nonroot-amd64
+        ARCH=amd64
+      extra-tags: |
+        type=raw,value=${{ github.ref_name }}
+      push: true
+      sign: true
+      scan: true
+  release-manifests:
+    name: Publish operator manifests
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Install Go
+        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Generate release artifacts
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          make manifest-modification \
+            REGISTRY=651706779278.dkr.ecr.us-west-2.amazonaws.com \
+            RELEASE_TAG="$RELEASE_TAG"
+          make release-manifests
+          make release-metadata
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
+        with:
+          files: out/*
+          generate_release_notes: true
